@@ -1,0 +1,14 @@
+[Unit]
+Description=Kage-Ryu Kernel Space eBPF Sensor Loader
+After=sysinit.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/usr/bin/mkdir -p /sys/fs/bpf/kage
+ExecStart=/usr/bin/bpftool prog loadall /usr/lib/bpf/kage_sensor.bpf.o /sys/fs/bpf/kage type tracepoint
+ExecStop=/usr/bin/rm -rf /sys/fs/bpf/kage
+
+[Install]
+WantedBy=multi-user.target

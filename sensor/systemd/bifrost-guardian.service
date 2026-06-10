@@ -1,0 +1,15 @@
+[Unit]
+Description=Bifrost Security Guardian Dashboard
+After=kage-sensor.service
+Wants=kage-sensor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python /usr/lib/bifrost/bifrost_guardian.py
+Restart=always
+RestartSec=2
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
