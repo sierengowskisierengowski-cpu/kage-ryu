@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# =============================================================================
+# sensor/kage-status — Kage-Ryu Sensor Stack Health Check
+# =============================================================================
+# Usage: bash sensor/kage-status
+#        (root recommended for full /proc and BPF visibility)
+# =============================================================================
+
+set -euo pipefail
+
+# ── Colour helpers ────────────────────────────────────────────────────────────
+GREEN='\e[32m'
+RED='\e[31m'
+YELLOW='\e[33m'
+CYAN='\e[36m'
+BOLD='\e[1m'
+RESET='\e[0m'
+
+ok()   { printf "  ${GREEN}✔${RESET}  %s\n" "$*"; }
+fail() { printf "  ${RED}✘${RESET}  %s\n" "$*"; }
+warn() { printf "  ${YELLOW}!${RESET}  %s\n" "$*"; }
+info() { printf "  ${CYAN}→${RESET}  %s\n" "$*"; }
+hdr()  { printf "\n${BOLD}%s${RESET}\n" "$*"; }
+
+# ── Header ────────────────────────────────────────────────────────────────────
+printf "\n${BOLD}${CYAN}╔══════════════════════════════════════════╗${RESET}\n"
+printf   "${BOLD}${CYAN}║     Kage-Ryu Sensor Stack — Status      ║${RESET}\n"
+printf   "${BOLD}${CYAN}╚══════════════════════════════════════════╝${RESET}\n"
+printf   "  Checked at: %s\n" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+# ── 1. Kernel check ───────────────────────────────────────────────────────────
+hdr "1. Kernel"
+kernel_name="$(uname -r)"
+if echo "$kernel_name" | grep -qi 'kage\|xanmod'; then
+    ok "Running kage-ryu / xanmod kernel: ${kernel_name}"
+else
+    warn "Kernel does not appear to be kage-ryu: ${kernel_name}"
+    info "Expected a kernel built from the linux-kage-ryu PKGBUILD."
+fi
+
+# Check BTF availability (required for eBPF sensor)
+if [[ -r /sys/kernel/btf/vmlinux ]]; then
+    ok "BTF available: /sys/kernel/btf/vmlinux"
+else
+    fail "BTF not available at /sys/kernel/btf/vmlinux — eBPF sensor cannot load."
+fi
+
+# ── 2. eBPF sensor ────────────────────────────────────────────────────────────
+hdr "2. eBPF Sensor"
+if systemctl is-active --quiet kage-sensor.service 2>/dev/null; then
+    ok "kage-sensor.service is active (BPF programs loaded)"
+else
+    fail "kage-sensor.service is NOT active"
+    info "Start with: systemctl start kage-sensor.service"
+fi
+
+# Check BPF programs are pinned
+if [[ -d /sys/fs/bpf/kage ]]; then
+    prog_count=$(find /sys/fs/bpf/kage -type f 2>/dev/null | wc -l)
+    ok "BPF programs pinned at /sys/fs/bpf/kage/ (${prog_count} objects)"
+else
+    fail "BPF pin directory /sys/fs/bpf/kage/ not found"
+fi
+
+# Check BPF object on disk
+if [[ -f /usr/lib/bpf/kage_sensor.bpf.o ]]; then
+    ok "BPF object present: /usr/lib/bpf/kage_sensor.bpf.o"
+else
+    fail "BPF object missing: /usr/lib/bpf/kage_sensor.bpf.o"
+    info "Run: sudo bash sensor/install.sh"
+fi
+
+# ── 3. jeTT daemon ────────────────────────────────────────────────────────────
+hdr "3. jeTT Daemon"
+if systemctl is-active --quiet jett.service 2>/dev/null; then
+    ok "jett.service is active"
+else
+    fail "jett.service is NOT active"
+    info "Start with: systemctl start jett.service"
+fi
+
+# Check whether jeTT is in eBPF or fallback mode
+if journalctl -u jett --since "5 minutes ago" --no-pager -q 2>/dev/null \
+       | grep -q 'FALLBACK MODE'; then
+    warn "jeTT is running in /proc FALLBACK mode — eBPF ring buffer unavailable."
+    info "Check: journalctl -u jett | grep FALLBACK"
+else
+    ok "jeTT appears to be running in normal eBPF mode"
+fi
+
+# Check Bifrost socket connectivity
+if [[ -S /var/run/jett_bifrost.sock ]]; then
+    ok "jeTT→Bifrost socket exists: /var/run/jett_bifrost.sock"
+else
+    fail "jeTT→Bifrost socket missing: /var/run/jett_bifrost.sock"
+    info "Bifrost must be running for jeTT to forward events."
+fi
+
+# ── 4. Bifrost Guardian ───────────────────────────────────────────────────────
+hdr "4. Bifrost Guardian"
+if systemctl is-active --quiet bifrost-guardian.service 2>/dev/null; then
+    ok "bifrost-guardian.service is active"
+else
+    fail "bifrost-guardian.service is NOT active"
+    info "Start with: systemctl start bifrost-guardian.service"
+fi
+
+# ── 5. Last 24-hour event count ───────────────────────────────────────────────
+hdr "5. Event Activity (last 24 h)"
+since_ts="$(date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo '')"
+
+if [[ -n "$since_ts" ]]; then
+    # Count events from journald
+    total_events=$(journalctl -u jett --since "${since_ts}" --no-pager -q 2>/dev/null | wc -l || echo 0)
+    quarantine_events=$(journalctl -u jett --since "${since_ts}" --no-pager -q 2>/dev/null | grep -c 'QUARANTINE' || echo 0)
+
+    info "Total log lines from jett:     ${total_events}"
+    if [[ "$quarantine_events" -gt 0 ]]; then
+        warn "QUARANTINE events in 24 h:     ${quarantine_events}  ⚠️"
+    else
+        ok "QUARANTINE events in 24 h:     ${quarantine_events}"
+    fi
+
+    # Also check log file if it exists
+    LOG_FILE="/var/log/jett/jett.log"
+    if [[ -f "$LOG_FILE" ]]; then
+        file_lines=$(wc -l < "$LOG_FILE" 2>/dev/null || echo 0)
+        info "Log file lines (${LOG_FILE}):  ${file_lines}"
+    fi
+else
+    warn "Could not determine 24 h window — check GNU date is available."
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+hdr "Summary"
+all_ok=true
+for svc in kage-sensor.service bifrost-guardian.service jett.service; do
+    if systemctl is-active --quiet "${svc}" 2>/dev/null; then
+        ok "${svc}"
+    else
+        fail "${svc}"
+        all_ok=false
+    fi
+done
+
+printf '\n'
+if $all_ok; then
+    printf "${GREEN}${BOLD}  All sensor stack services are operational.${RESET}\n\n"
+else
+    printf "${RED}${BOLD}  One or more services are not running — review output above.${RESET}\n\n"
+    printf "  Quick fix: sudo bash sensor/install.sh\n\n"
+fi

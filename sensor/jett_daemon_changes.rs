@@ -1,13 +1,16 @@
 // jeTT eBPF Ring Buffer Reader
 // Replace the /proc polling loop in src/bin/daemon.rs with this
-// Requires: libbpf-rs, serde_json, lazy_static in Cargo.toml
+// Requires: libbpf-rs, libbpf-sys, serde_json, lazy_static in Cargo.toml
 
 use libbpf_rs::RingBufferBuilder;
-use std::os::unix::net::UnixStream;
+use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
 use serde_json::json;
 
+// ── Shared data layout (must match kage_sensor.bpf.c:event_t) ───────────────
 #[repr(C)]
 struct KernelEvent {
     pid: u32,
@@ -18,20 +21,53 @@ struct KernelEvent {
 }
 
 lazy_static::lazy_static! {
+    /// Unix socket connection to the Bifrost Guardian dashboard process.
     static ref BIFROST_SOCKET: Mutex<Option<UnixStream>> = Mutex::new(
         UnixStream::connect("/var/run/jett_bifrost.sock").ok()
     );
+
+    /// File descriptor of the eBPF `quarantine_map` (BPF_MAP_TYPE_HASH, u32→u32).
+    ///
+    /// Populated in `main()` once the BPF skeleton is loaded.  The ring-buffer
+    /// callback uses it to write a quarantined PID directly into the kernel map
+    /// so that `kage_enforce_quarantine` (lsm/bprm_check_security) blocks any
+    /// subsequent `execve()` from that process.
+    static ref QUARANTINE_MAP_FD: Mutex<Option<i32>> = Mutex::new(None);
 }
 
+// ── Entry point ───────────────────────────────────────────────────────────────
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("⚡ jeTT Daemon: Streaming live kage-ryu telemetry...");
+    println!("⚡ jeTT Daemon: Streaming live kage-ryu telemetry…");
 
+    // ── Try to load the eBPF skeleton ─────────────────────────────────────────
+    match try_ebpf_mode() {
+        Ok(()) => {}
+        Err(e) => {
+            eprintln!(
+                "⚠️  jeTT FALLBACK MODE: eBPF ring buffer unavailable ({e}).\n\
+                 ⚠️  Switching to /proc polling — higher overhead, reduced visibility.\n\
+                 ⚠️  Resolve eBPF setup (BTF kernel, kage-sensor.service) for full protection."
+            );
+            run_proc_fallback()?;
+        }
+    }
+    Ok(())
+}
+
+// ── Normal (eBPF) mode ────────────────────────────────────────────────────────
+fn try_ebpf_mode() -> Result<(), Box<dyn std::error::Error>> {
     let mut skel_builder = libbpf_rs::SkeletonBuilder::new();
     let mut open_skel = skel_builder.open_file("/usr/lib/bpf/kage_sensor.bpf.o")?;
     let mut skel = open_skel.load()?;
     skel.attach()?;
 
     let maps = skel.maps();
+
+    // Store the quarantine_map fd for use in the ring-buffer callback.
+    // SAFETY: The fd is valid for the lifetime of `skel`, which is kept alive
+    // for the entire duration of the polling loop below.
+    *QUARANTINE_MAP_FD.lock().unwrap() = Some(maps.quarantine_map().fd());
+
     let ringbuf_map = maps.kage_ringbuf();
 
     let mut rb_builder = RingBufferBuilder::new();
@@ -43,35 +79,149 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+// ── Ring-buffer event handler ─────────────────────────────────────────────────
 fn handle_kernel_event(data: &[u8]) -> i32 {
-    if data.len() < std::mem::size_of::<KernelEvent>() { return 0; }
+    if data.len() < std::mem::size_of::<KernelEvent>() {
+        return 0;
+    }
 
+    // SAFETY: `data` is a kernel-provided buffer whose layout matches
+    // `struct event_t` in kage_sensor.bpf.c.  The length check above
+    // guarantees the slice is at least as large as `KernelEvent`.
     let raw_event = unsafe { &*(data.as_ptr() as *const KernelEvent) };
-    let comm = String::from_utf8_lossy(&raw_event.comm).trim_matches('\0').to_string();
+    let comm    = String::from_utf8_lossy(&raw_event.comm).trim_matches('\0').to_string();
     let details = String::from_utf8_lossy(&raw_event.details).trim_matches('\0').to_string();
 
     let verdict = evaluate_ai_verdict(raw_event.event_type, &comm, &details);
 
     if verdict == "QUARANTINE" {
         println!("🚨 jeTT QUARANTINE: {} (PID: {})", comm, raw_event.pid);
+        // Write PID into the kernel quarantine_map so that the LSM hook
+        // (`kage_enforce_quarantine`) blocks any further execve() from this PID.
+        enforce_quarantine_in_map(raw_event.pid);
     }
 
-    if let Some(ref mut stream) = *BIFROST_SOCKET.lock().unwrap() {
-        let payload = json!({
-            "pid": raw_event.pid,
-            "uid": raw_event.uid,
-            "app": comm,
-            "type": raw_event.event_type,
-            "msg": details,
-            "verdict": verdict
-        }).to_string() + "\n";
-        let _ = stream.write_all(payload.as_bytes());
-    }
+    send_to_bifrost(raw_event.pid, raw_event.uid, &comm, raw_event.event_type, &details, verdict);
     0
 }
 
-fn evaluate_ai_verdict(event_type: u32, comm: &str, details: &str) -> &'static str {
-    // Connect to existing jeTT AI inference here
+/// Insert `pid` into the eBPF `quarantine_map` so the kernel LSM hook can
+/// block the process from executing new binaries.
+///
+/// # Safety assumptions
+/// - `QUARANTINE_MAP_FD` holds a valid BPF map fd opened with `BPF_MAP_TYPE_HASH`,
+///   `key_size = 4`, `value_size = 4`.
+/// - The fd remains valid for the duration of the daemon's lifetime.
+/// - A failed update is logged and silently ignored (best-effort enforcement);
+///   Bifrost still receives the QUARANTINE verdict for out-of-band action.
+fn enforce_quarantine_in_map(pid: u32) {
+    let guard = QUARANTINE_MAP_FD.lock().unwrap();
+    if let Some(fd) = *guard {
+        let value: u32 = 1u32;
+        // SAFETY: We pass valid pointers to 4-byte values matching the map's
+        // declared key_size/value_size, and BPF_ANY (0) as the update flag.
+        let ret = unsafe {
+            libbpf_sys::bpf_map_update_elem(
+                fd,
+                &pid as *const u32 as *const libbpf_sys::c_void,
+                &value as *const u32 as *const libbpf_sys::c_void,
+                libbpf_sys::BPF_ANY as u64,
+            )
+        };
+        if ret != 0 {
+            eprintln!(
+                "⚠️  jeTT: bpf_map_update_elem failed for PID {} (errno {})",
+                pid, ret
+            );
+        }
+    } else {
+        eprintln!("⚠️  jeTT: quarantine_map fd not available; cannot enforce PID {} in kernel.", pid);
+    }
+}
+
+// ── Fallback: /proc polling ───────────────────────────────────────────────────
+/// Poll `/proc` for new processes when the eBPF ring buffer is unavailable.
+///
+/// Limitations compared to the eBPF path:
+/// - ~250 ms latency between process creation and detection.
+/// - No file-open or network-connect visibility; only new PID detection.
+/// - QUARANTINE enforcement is best-effort via SIGKILL (no kernel map available).
+fn run_proc_fallback() -> Result<(), Box<dyn std::error::Error>> {
+    let mut known_pids: HashMap<u32, ()> = HashMap::new();
+
+    loop {
+        if let Ok(entries) = fs::read_dir("/proc") {
+            let mut current_pids: HashMap<u32, ()> = HashMap::new();
+
+            for entry in entries.flatten() {
+                let fname = entry.file_name();
+                let name = fname.to_string_lossy();
+                if let Ok(pid) = name.parse::<u32>() {
+                    current_pids.insert(pid, ());
+
+                    if !known_pids.contains_key(&pid) {
+                        // New process — evaluate it
+                        let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+                        let cmdline = fs::read_to_string(format!("/proc/{pid}/cmdline"))
+                            .unwrap_or_default()
+                            .replace('\0', " ")
+                            .trim()
+                            .to_string();
+
+                        let verdict = evaluate_ai_verdict(1, &comm, &cmdline);
+
+                        if verdict == "QUARANTINE" {
+                            eprintln!(
+                                "🚨 jeTT FALLBACK QUARANTINE: {} (PID: {}) — sending SIGKILL",
+                                comm, pid
+                            );
+                            // Best-effort: signal the process.
+                            // We use `kill -9` via the shell to avoid a libc dependency.
+                            // Assumption: process may have already exited; the shell call
+                            // failing is non-fatal.
+                            let _ = std::process::Command::new("kill")
+                                .args(["-9", &pid.to_string()])
+                                .status();
+                        }
+
+                        send_to_bifrost(pid, 0, &comm, 1, &cmdline, verdict);
+                    }
+                }
+            }
+
+            known_pids = current_pids;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+/// Forward an event to the Bifrost Guardian over the Unix socket.
+fn send_to_bifrost(pid: u32, uid: u32, app: &str, event_type: u32, msg: &str, verdict: &str) {
+    if let Some(ref mut stream) = *BIFROST_SOCKET.lock().unwrap() {
+        let payload = json!({
+            "pid":     pid,
+            "uid":     uid,
+            "app":     app,
+            "type":    event_type,
+            "msg":     msg,
+            "verdict": verdict
+        })
+        .to_string()
+            + "\n";
+        let _ = stream.write_all(payload.as_bytes());
+    }
+}
+
+/// Heuristic threat-scoring function.
+///
+/// Replace / extend with the real jeTT AI inference engine as appropriate.
+fn evaluate_ai_verdict(_event_type: u32, _comm: &str, details: &str) -> &'static str {
     if details.contains("/etc/shadow") || details.contains("/tmp/.") {
         return "QUARANTINE";
     }

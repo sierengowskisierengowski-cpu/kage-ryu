@@ -9,10 +9,9 @@
 ##
 ## Look inside 'choose-gcc-optimization.sh' to choose your microarchitecture
 ## Valid numbers between: 0 to 99
-## Default is: 0 => generic
-## Good option if your package is for one machine: 98 (Intel native) or 99 (AMD native)
+## Default is: 98 => Intel native (override for generic/portable builds)
 if [ -z ${_microarchitecture+x} ]; then
-  _microarchitecture=0
+  _microarchitecture=98
 fi
 
 ## Disable NUMA since most users do not have multiple processors. Breaks CUDA/NvEnc.
@@ -20,7 +19,7 @@ fi
 ## Set variable "use_numa" to: n to disable (possibly increase performance)
 ##                             y to enable  (stock default)
 if [ -z ${use_numa+x} ]; then
-  use_numa=y
+  use_numa=n
 fi
 
 ## Since upstream disabled CONFIG_STACK_TRACER (limits debugging and analyzing of the kernel)
@@ -71,7 +70,7 @@ fi
 
 ### IMPORTANT: Do no edit below this line unless you know what you're doing
 
-pkgbase=linux-xanmod
+pkgbase=linux-kage-ryu
 _major=7.0
 pkgver=${_major}.12
 _branch=7.x
@@ -79,7 +78,7 @@ xanmod=1
 _revision=
 _sf_branch=main
 pkgrel=${xanmod}
-pkgdesc='Linux Xanmod - Stable Mainline [MAIN]'
+pkgdesc='Linux Kage-Ryu — Xanmod base, tuned for Intel native with eBPF/WireGuard/NTFS3'
 url="http://www.xanmod.org/"
 arch=(x86_64)
 license=(GPL-2.0-only)
@@ -123,8 +122,8 @@ sha256sums=('bb7f6d80b387c757b7d14bb93028fcb90f793c5c0d367736ee815a100b3891f0'
             '439ac7caf589af0d5817bb0578c5ec0d47096e1e3bff5b893ead91ced642bd43'
             'f4acc1760990c54348a029315d1505ccb7c7270cd70a9aeb728bffcced51e767')
 
-export KBUILD_BUILD_HOST=${KBUILD_BUILD_HOST:-archlinux}
-export KBUILD_BUILD_USER=${KBUILD_BUILD_USER:-makepkg}
+export KBUILD_BUILD_HOST=${KBUILD_BUILD_HOST:-gowskinet}
+export KBUILD_BUILD_USER=${KBUILD_BUILD_USER:-cosmic}
 export KBUILD_BUILD_TIMESTAMP=${KBUILD_BUILD_TIMESTAMP:-$(date -Ru${SOURCE_DATE_EPOCH:+d @$SOURCE_DATE_EPOCH})}
 
 prepare() {
@@ -135,7 +134,7 @@ prepare() {
 
   msg2 "Setting version..."
   echo "-$pkgrel" > localversion.10-pkgrel
-  echo "${pkgbase#linux-xanmod}" > localversion.20-pkgname
+  echo "${pkgbase#linux-}" > localversion.20-pkgname
 
   # Archlinux patches
   local src
@@ -185,6 +184,42 @@ prepare() {
     scripts/config --disable CONFIG_NUMA
   fi
 
+  # ── Kage-Ryu specific tuning ──────────────────────────────────────────────
+
+  # HZ=1000 for lowest scheduling latency on a gaming/workstation build
+  msg2 "Setting HZ=1000..."
+  scripts/config --set-val CONFIG_HZ 1000
+  scripts/config --enable  CONFIG_HZ_1000
+  scripts/config --disable CONFIG_HZ_250
+  scripts/config --disable CONFIG_HZ_300
+
+  # Full kernel preemption (PREEMPT_RT-style voluntary → full)
+  msg2 "Enabling full preemption..."
+  scripts/config --enable  CONFIG_PREEMPT
+  scripts/config --disable CONFIG_PREEMPT_NONE
+  scripts/config --disable CONFIG_PREEMPT_VOLUNTARY
+
+  # eBPF / WireGuard / NTFS3 — keep these enabled
+  msg2 "Ensuring eBPF, WireGuard and NTFS3 are enabled..."
+  scripts/config --enable CONFIG_BPF
+  scripts/config --enable CONFIG_BPF_SYSCALL
+  scripts/config --enable CONFIG_BPF_JIT
+  scripts/config --enable CONFIG_BPF_LSM
+  scripts/config --enable CONFIG_DEBUG_INFO_BTF
+  scripts/config --enable CONFIG_WIREGUARD
+  scripts/config --enable CONFIG_NTFS3_FS
+
+  # Strip legacy / niche subsystems not needed on this build target
+  msg2 "Stripping ham radio / ISDN / ATM / PCMCIA / FireWire / NFC / InfiniBand..."
+  scripts/config --disable CONFIG_HAMRADIO
+  scripts/config --disable CONFIG_ISDN
+  scripts/config --disable CONFIG_ATM
+  scripts/config --disable CONFIG_PCMCIA
+  scripts/config --disable CONFIG_CARDBUS
+  scripts/config --disable CONFIG_FIREWIRE
+  scripts/config --disable CONFIG_NFC
+  scripts/config --disable CONFIG_INFINIBAND
+
   # Compress modules by default (following Arch's kernel)
   if [ "$_compress_modules" = "y" ]; then
     scripts/config --enable CONFIG_MODULE_COMPRESS
@@ -206,7 +241,7 @@ prepare() {
   # Put the file "myconfig" at the package folder (this will take preference) or "${XDG_CONFIG_HOME}/linux-xanmod/myconfig"
   # If we detect partial file with scripts/config commands, we execute as a script
   # If not, it's a full config, will be replaced
-  for _myconfig in "${SRCDEST}/myconfig" "${HOME}/.config/linux-xanmod/myconfig" "${XDG_CONFIG_HOME}/linux-xanmod/myconfig" ; do
+  for _myconfig in "${SRCDEST}/myconfig" "${HOME}/.config/linux-kage-ryu/myconfig" "${XDG_CONFIG_HOME}/linux-kage-ryu/myconfig" ; do
     if [ -f "${_myconfig}" ] && [ "$(wc -l <"${_myconfig}")" -gt "0" ]; then
       if grep -q 'scripts/config' "${_myconfig}"; then
         # myconfig is a partial file. Executing as a script
@@ -255,7 +290,7 @@ build() {
 }
 
 _package() {
-  pkgdesc="The Linux kernel and modules with Xanmod patches"
+  pkgdesc="The Linux kernel and modules with Xanmod patches (Kage-Ryu build)"
   depends=(
     coreutils
     initramfs
