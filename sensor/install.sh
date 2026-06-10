@@ -90,7 +90,7 @@ if [[ -f "${SENSOR_DIR}/jett_daemon" ]]; then
     ok "jeTT daemon installed from pre-built binary."
 elif command -v cargo &>/dev/null && [[ -f "${SENSOR_DIR}/Cargo.toml" ]]; then
     info "Building jeTT daemon from source (this may take a while)…"
-    (cd "${SENSOR_DIR}" && cargo build --release)
+    (cd "${SENSOR_DIR}" && cargo build --release) || die "jeTT build failed. Check cargo output above."
     install -m 755 "${SENSOR_DIR}/target/release/jett_daemon" "${JETT_BIN}"
     ok "jeTT daemon built and installed."
 else

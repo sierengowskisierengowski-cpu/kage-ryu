@@ -12,6 +12,7 @@ path = "jett_daemon_changes.rs"
 # eBPF skeleton / ring-buffer integration
 libbpf-rs  = "0.24"
 libbpf-sys = "1.4"
+nix = { version = "0.31", features = ["signal", "process"] }
 
 # Lazy static globals (BIFROST_SOCKET, QUARANTINE_MAP_FD)
 lazy_static = "1"

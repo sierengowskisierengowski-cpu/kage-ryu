@@ -51,8 +51,16 @@ class SocketIPCTest(unittest.TestCase):
             client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
             client.close()
 
+            offset = 0
+            log_tail = ""
             for _ in range(50):
-                if os.path.exists(log_path) and "Accepted jeTT client" in Path(log_path).read_text():
+                if os.path.exists(log_path):
+                    with open(log_path, "r", encoding="utf-8") as handle:
+                        handle.seek(offset)
+                        chunk = handle.read()
+                        offset = handle.tell()
+                        log_tail += chunk
+                if "Accepted jeTT client" in log_tail:
                     break
                 time.sleep(0.1)
 

@@ -49,6 +49,7 @@ dependencies = [
  "lazy_static",
  "libbpf-rs",
  "libbpf-sys",
+ "nix",
  "serde_json",
 ]
 

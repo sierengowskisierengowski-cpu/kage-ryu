@@ -49,7 +49,7 @@ def start_bifrost_receiver(socket_path=SOCKET_PATH, log_path=LOG_PATH, expected_
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
     server.bind(socket_path)
-    os.chmod(socket_path, 0o660)
+    os.chmod(socket_path, 0o600)
     server.listen(5)
 
     logger.info("Bifrost ready on %s", socket_path)

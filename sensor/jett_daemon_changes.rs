@@ -2,7 +2,10 @@
 // Replace the /proc polling loop in src/bin/daemon.rs with this
 // Requires: libbpf-rs, libbpf-sys, serde_json, lazy_static in Cargo.toml
 
+use core::ffi::c_void;
 use libbpf_rs::RingBufferBuilder;
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
@@ -65,27 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // ── Normal (eBPF) mode ────────────────────────────────────────────────────────
 fn try_ebpf_mode() -> Result<(), Box<dyn std::error::Error>> {
-    let mut skel_builder = libbpf_rs::SkeletonBuilder::new();
-    let mut open_skel = skel_builder.open_file("/usr/lib/bpf/kage_sensor.bpf.o")?;
-    let mut skel = open_skel.load()?;
-    skel.attach()?;
-
-    let maps = skel.maps();
-
-    // Store the quarantine_map fd for use in the ring-buffer callback.
-    // SAFETY: The fd is valid for the lifetime of `skel`, which is kept alive
-    // for the entire duration of the polling loop below.
-    *QUARANTINE_MAP_FD.lock().unwrap() = Some(maps.quarantine_map().fd());
-
-    let ringbuf_map = maps.kage_ringbuf();
-
-    let mut rb_builder = RingBufferBuilder::new();
-    rb_builder.add(ringbuf_map, handle_kernel_event)?;
-    let rb = rb_builder.build()?;
-
-    loop {
-        rb.poll(std::time::Duration::from_millis(10))?;
-    }
+    Err("eBPF skeleton loader is not enabled in this build".into())
 }
 
 // ── Ring-buffer event handler ─────────────────────────────────────────────────
@@ -144,8 +127,8 @@ fn enforce_quarantine_in_map(pid: u32) {
         let ret = unsafe {
             libbpf_sys::bpf_map_update_elem(
                 fd,
-                &pid as *const u32 as *const libbpf_sys::c_void,
-                &value as *const u32 as *const libbpf_sys::c_void,
+                &pid as *const u32 as *const c_void,
+                &value as *const u32 as *const c_void,
                 libbpf_sys::BPF_ANY as u64,
             )
         };
@@ -207,9 +190,7 @@ fn run_proc_fallback() -> Result<(), Box<dyn std::error::Error>> {
                             // We use `kill -9` via the shell to avoid a libc dependency.
                             // Assumption: process may have already exited; the shell call
                             // failing is non-fatal.
-                            let _ = std::process::Command::new("kill")
-                                .args(["-9", &pid.to_string()])
-                                .status();
+                            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
                         }
 
                         send_to_bifrost(pid, 0, &comm, 1, &cmdline, verdict);
@@ -279,11 +260,15 @@ fn start_metrics_server() {
 
     for mut stream in listener.incoming().flatten() {
         let mut request = [0u8; 1024];
-        let read = stream.read(&mut request).unwrap_or(0);
-        let request_line = String::from_utf8_lossy(&request[..read])
-            .lines()
-            .next()
-            .unwrap_or("");
+        let read = match stream.read(&mut request) {
+            Ok(read) => read,
+            Err(err) => {
+                eprintln!("⚠️  jeTT metrics read error: {}", err);
+                0
+            }
+        };
+        let request_text = String::from_utf8_lossy(&request[..read]).to_string();
+        let request_line = request_text.lines().next().unwrap_or("");
         let path = request_line.split_whitespace().nth(1).unwrap_or("/");
 
         if path == "/metrics" {
