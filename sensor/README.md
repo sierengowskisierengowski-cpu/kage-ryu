@@ -17,11 +17,13 @@ and enforcement pipeline built for Arch Linux.
 | `bifrost_guardian.py` | Bifrost: Unix-socket server that receives jeTT verdicts, displays dashboard, sends push notifications on QUARANTINE |
 | `Cargo.toml` | Rust dependencies for jeTT daemon |
 | `install.sh` | One-shot installer: compiles eBPF program, installs all components, enables systemd services |
+| `uninstall.sh` | Teardown script: disables services and removes installed sensor artifacts |
 | `systemd/kage-sensor.service` | Loads the compiled BPF object and pins programs via bpftool |
 | `systemd/bifrost-guardian.service` | Starts Bifrost socket server, waits for socket readiness before jeTT starts |
 | `systemd/jett.service` | Starts jeTT daemon (depends on kage-sensor + bifrost-guardian) |
 | `kage-status` | Operator health-check script |
 | `logrotate.conf` | Log rotation for `/var/log/jett/jett.log` |
+| `test/` | Basic unit tests for verdict logic and Unix socket IPC |
 
 ---
 
@@ -61,6 +63,8 @@ and enforcement pipeline built for Arch Linux.
 │  Bifrost Guardian (bifrost_guardian.py)                     │
 │                                                              │
 │  • Renders security dashboard in terminal                   │
+│  • Authenticates jeTT via SCM_CREDENTIALS                   │
+│  • Logs events to /var/log/jett/jett.log                    │
 │  • Sends push notifications (Pushover / NTFY) on QUARANTINE │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -113,6 +117,9 @@ journalctl -u jett -f
 
 # Quick health check
 bash sensor/kage-status
+
+# Tear down the installed sensor stack
+sudo bash sensor/uninstall.sh
 ```
 
 ---
@@ -127,6 +134,7 @@ bash sensor/kage-status
   load (e.g., missing BTF, wrong kernel).  Performance is degraded (~250 ms
   detection latency vs. near-zero in eBPF mode); check `journalctl -u jett`.
 - Log files are rotated weekly by `/etc/logrotate.d/jett`.
+- jeTT exposes Prometheus metrics on `http://127.0.0.1:9101/metrics`.
 
 ---
 
