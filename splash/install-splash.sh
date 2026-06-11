@@ -68,8 +68,8 @@ info "Updating ${MKINITCPIO_CONF} to include 'plymouth' hook…"
 
 [[ -f "${MKINITCPIO_CONF}" ]] || die "${MKINITCPIO_CONF} not found."
 
-# Back up before editing (idempotent: only overwrite if content differs)
-if ! cmp -s "${MKINITCPIO_CONF}" "${MKINITCPIO_CONF}.bak" 2>/dev/null; then
+# Back up before editing (idempotent: only create backup on first run)
+if [[ ! -f "${MKINITCPIO_CONF}.bak" ]]; then
     cp "${MKINITCPIO_CONF}" "${MKINITCPIO_CONF}.bak"
     ok "Backed up ${MKINITCPIO_CONF} → ${MKINITCPIO_CONF}.bak"
 fi
@@ -86,7 +86,8 @@ else
         ok "Inserted 'plymouth' after 'systemd' in HOOKS."
     else
         # Fallback: append plymouth before the closing paren of a single-line HOOKS=(...)
-        # Warn if HOOKS appears to span multiple lines so the operator can review
+        # Warn if HOOKS appears to span multiple lines so the operator can review.
+        # awk exits 0 (success) when HOOKS is on a single line, 1 (failure) when multi-line.
         if awk '/^HOOKS=\(/{found=1} found && /\)/{found=0; exit 0} found{exit 1}' "${MKINITCPIO_CONF}"; then
             sed -i '/^HOOKS=(/s/)$/ plymouth)/' "${MKINITCPIO_CONF}"
             ok "Appended 'plymouth' to HOOKS in ${MKINITCPIO_CONF}."
@@ -106,8 +107,8 @@ GRUB_DEFAULT="/etc/default/grub"
 info "Ensuring 'splash quiet' are in ${GRUB_DEFAULT}…"
 
 if [[ -f "${GRUB_DEFAULT}" ]]; then
-    # Back up before editing
-    if ! cmp -s "${GRUB_DEFAULT}" "${GRUB_DEFAULT}.bak" 2>/dev/null; then
+    # Back up before editing (idempotent: only create backup on first run)
+    if [[ ! -f "${GRUB_DEFAULT}.bak" ]]; then
         cp "${GRUB_DEFAULT}" "${GRUB_DEFAULT}.bak"
         ok "Backed up ${GRUB_DEFAULT} → ${GRUB_DEFAULT}.bak"
     fi

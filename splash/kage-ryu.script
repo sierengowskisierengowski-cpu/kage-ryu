@@ -19,6 +19,7 @@ logo_sprite.SetZ(1);
 
 # ── Pulsing animation counter ─────────────────────────────────────────────────
 counter = 0;
+# Use Math.PI if available in this Plymouth version; fall back to a constant otherwise
 PI = 3.14159265359;
 
 fun refresh_callback() {
