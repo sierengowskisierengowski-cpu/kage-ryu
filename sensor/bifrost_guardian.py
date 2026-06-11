@@ -1,57 +1,126 @@
+import json
+import logging
+from logging.handlers import WatchedFileHandler
 import os
 import socket
-import json
+import struct
 import threading
 
 SOCKET_PATH = "/var/run/jett_bifrost.sock"
+LOG_PATH = "/var/log/jett/jett.log"
+EXPECTED_UID = int(os.environ.get("JETT_BIFROST_UID", "0"))
 
-def start_bifrost_receiver():
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
+
+def setup_logger(log_path=LOG_PATH):
+    logger = logging.getLogger("bifrost")
+    if logger.handlers:
+        return logger
+
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    file_handler = WatchedFileHandler(log_path)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+    return logger
+
+
+def extract_credentials(ancdata):
+    for level, ctype, data in ancdata:
+        if level == socket.SOL_SOCKET and ctype == socket.SCM_CREDENTIALS:
+            return struct.unpack("3i", data[:12])
+    return None
+
+
+def start_bifrost_receiver(socket_path=SOCKET_PATH, log_path=LOG_PATH, expected_uid=EXPECTED_UID):
+    logger = setup_logger(log_path)
+
+    if os.path.exists(socket_path):
+        os.remove(socket_path)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(SOCKET_PATH)
-    os.chmod(SOCKET_PATH, 0o666)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+    server.bind(socket_path)
+    os.chmod(socket_path, 0o600)
     server.listen(5)
 
-    print(f"🛡️ Bifrost Core: Operational. Listening for jeTT verdicts on {SOCKET_PATH}...")
+    logger.info("Bifrost ready on %s", socket_path)
 
     while True:
         conn, _ = server.accept()
-        threading.Thread(target=handle_jett_connection, args=(conn,), daemon=True).start()
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
+        threading.Thread(
+            target=handle_jett_connection,
+            args=(conn, logger, expected_uid),
+            daemon=True,
+        ).start()
 
-def handle_jett_connection(conn):
+
+def handle_jett_connection(conn, logger, expected_uid):
     buffer = ""
+    authenticated = False
     try:
         while True:
-            data = conn.recv(4096).decode('utf-8')
+            data, ancdata, *_ = conn.recvmsg(4096, socket.CMSG_SPACE(struct.calcsize("3i")))
             if not data:
                 break
-            buffer += data
+            if not authenticated:
+                credentials = extract_credentials(ancdata)
+                if credentials is None:
+                    logger.warning("Rejected socket client without SCM_CREDENTIALS")
+                    break
+                pid, uid, gid = credentials
+                if uid != expected_uid:
+                    logger.warning(
+                        "Rejected socket client pid=%s uid=%s gid=%s (expected uid %s)",
+                        pid,
+                        uid,
+                        gid,
+                        expected_uid,
+                    )
+                    break
+                authenticated = True
+                logger.info("Accepted jeTT client pid=%s uid=%s gid=%s", pid, uid, gid)
+
+            buffer += data.decode("utf-8", errors="replace")
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 if line.strip():
-                    event_packet = json.loads(line)
-                    update_dashboard_ui(event_packet)
-    except Exception as e:
-        print(f"⚠️ Socket Stream Exception: {e}")
+                    try:
+                        event_packet = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        logger.warning("Dropping malformed event packet: %s", exc)
+                        continue
+                    update_dashboard_ui(event_packet, logger)
+    except Exception as exc:
+        logger.warning("Socket stream exception: %s", exc)
     finally:
         conn.close()
 
-def update_dashboard_ui(packet):
-    print(f"\n==============================================")
-    print(f"📊 BIFROST SECURITY UPDATE")
-    print(f"Application: {packet['app']} (PID: {packet['pid']})")
-    print(f"Activity:    {packet['msg']}")
-    print(f"AI Verdict:  [{packet['verdict']}]")
-    print(f"==============================================")
 
-    if packet['verdict'] == "QUARANTINE":
-        send_push_notification(packet)
+def update_dashboard_ui(packet, logger):
+    logger.info("==============================================")
+    logger.info("BIFROST SECURITY UPDATE")
+    logger.info("Application: %s (PID: %s)", packet.get("app"), packet.get("pid"))
+    logger.info("Activity: %s", packet.get("msg"))
+    logger.info("AI Verdict: [%s]", packet.get("verdict"))
+    logger.info("==============================================")
 
-def send_push_notification(packet):
-    # Hook phone notifications here (Pushover, NTFY, Twilio)
-    pass
+    if packet.get("verdict") == "QUARANTINE":
+        send_push_notification(packet, logger)
+
+
+def send_push_notification(packet, logger):
+    logger.warning("Push notification requested for %s", packet.get("app"))
+
 
 if __name__ == "__main__":
     start_bifrost_receiver()

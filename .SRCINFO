@@ -1,5 +1,5 @@
-pkgbase = linux-xanmod
-	pkgdesc = Linux Xanmod - Stable Mainline [MAIN]
+pkgbase = linux-kage-ryu
+	pkgdesc = Linux Kage-Ryu — Xanmod base, tuned for Intel native with eBPF/WireGuard/NTFS3
 	pkgver = 7.0.12
 	pkgrel = 1
 	url = http://www.xanmod.org/
@@ -29,8 +29,8 @@ pkgbase = linux-xanmod
 	sha256sums = 439ac7caf589af0d5817bb0578c5ec0d47096e1e3bff5b893ead91ced642bd43
 	sha256sums = f4acc1760990c54348a029315d1505ccb7c7270cd70a9aeb728bffcced51e767
 
-pkgname = linux-xanmod
-	pkgdesc = The Linux kernel and modules with Xanmod patches
+pkgname = linux-kage-ryu
+	pkgdesc = The Linux kernel and modules with Xanmod patches (Kage-Ryu build)
 	depends = coreutils
 	depends = initramfs
 	depends = kmod
@@ -45,6 +45,6 @@ pkgname = linux-xanmod
 	replaces = virtualbox-guest-modules-arch
 	replaces = wireguard-arch
 
-pkgname = linux-xanmod-headers
-	pkgdesc = Headers and scripts for building modules for the Linux Xanmod - Stable Mainline [MAIN] kernel
+pkgname = linux-kage-ryu-headers
+	pkgdesc = Headers and scripts for building modules for the Linux Kage-Ryu kernel
 	depends = pahole

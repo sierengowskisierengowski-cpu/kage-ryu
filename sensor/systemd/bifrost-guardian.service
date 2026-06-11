@@ -1,12 +1,24 @@
 [Unit]
 Description=Bifrost Security Guardian Dashboard
+# Must start only after the eBPF sensor is loaded and pinned
 After=kage-sensor.service
-Wants=kage-sensor.service
+Requires=kage-sensor.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python /usr/lib/bifrost/bifrost_guardian.py
-Restart=always
+ExecStart=/usr/bin/python3 /usr/lib/bifrost/bifrost_guardian.py
+# After Bifrost has bound its Unix socket, confirm readiness before jett.service
+# races to connect.  jett.service already Requires= this unit; the ExecStartPost
+# poll ensures the socket is actually listening before systemd considers this
+# unit fully started.  Retries for up to 10 s (20 × 0.5 s).
+ExecStartPost=/bin/bash -c \
+    'for i in $(seq 1 20); do \
+         [ -S /var/run/jett_bifrost.sock ] && exit 0; \
+         sleep 0.5; \
+     done; \
+     echo "bifrost-guardian: socket /var/run/jett_bifrost.sock did not appear" >&2; \
+     exit 1'
+Restart=on-failure
 RestartSec=2
 User=root
 Group=root
