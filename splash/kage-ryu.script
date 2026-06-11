@@ -1,0 +1,69 @@
+# =============================================================================
+# kage-ryu.script — Plymouth boot splash for Kage-Ryu Shadow Dragon Kernel
+# =============================================================================
+
+# ── Background ────────────────────────────────────────────────────────────────
+Window.SetBackgroundTopColor(0.04, 0.04, 0.06);
+Window.SetBackgroundBottomColor(0.02, 0.02, 0.04);
+
+# ── Logo ──────────────────────────────────────────────────────────────────────
+logo_image  = Image("logo.png");
+logo_sprite = Sprite(logo_image);
+
+logo_x = Math.Int((Window.GetWidth()  - logo_image.GetWidth())  / 2);
+logo_y = Math.Int((Window.GetHeight() - logo_image.GetHeight()) / 2);
+
+logo_sprite.SetX(logo_x);
+logo_sprite.SetY(logo_y);
+logo_sprite.SetZ(1);
+
+# ── Pulsing animation counter ─────────────────────────────────────────────────
+counter = 0;
+
+fun refresh_callback() {
+    counter = counter + 1;
+    # Gentle sine-like pulse: opacity oscillates between 0.65 and 1.0
+    t = Math.Int(counter % 120) / 120.0;
+    opacity = 0.65 + 0.35 * Math.Sin(t * 2 * 3.14159);
+    logo_sprite.SetOpacity(opacity);
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# ── Password / LUKS prompt ────────────────────────────────────────────────────
+password_sprite = Sprite();
+password_sprite.SetZ(2);
+
+fun display_password_callback(prompt, bullets) {
+    # Build display string: prompt + bullet characters for entered chars
+    bullet_str = "";
+    i = 0;
+    while (i < bullets) {
+        bullet_str = bullet_str + "●";
+        i = i + 1;
+    }
+
+    display_text = prompt + "  " + bullet_str;
+    text_image   = Image.Text(display_text, 1.0, 1.0, 1.0, 1.0);
+
+    password_sprite.SetImage(text_image);
+    password_sprite.SetX(Math.Int((Window.GetWidth()  - text_image.GetWidth())  / 2));
+    password_sprite.SetY(Math.Int((Window.GetHeight() + logo_image.GetHeight()) / 2) + 20);
+    password_sprite.SetOpacity(1.0);
+}
+
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+
+# ── Status messages ───────────────────────────────────────────────────────────
+message_sprite = Sprite();
+message_sprite.SetZ(2);
+
+fun message_callback(text) {
+    msg_image = Image.Text(text, 0.6, 0.6, 0.7, 1.0);
+    message_sprite.SetImage(msg_image);
+    message_sprite.SetX(Math.Int((Window.GetWidth() - msg_image.GetWidth()) / 2));
+    message_sprite.SetY(Window.GetHeight() - msg_image.GetHeight() - 20);
+    message_sprite.SetOpacity(1.0);
+}
+
+Plymouth.SetMessageFunction(message_callback);

@@ -11,6 +11,7 @@
 #   - python3          (for Bifrost Guardian)
 #   - systemd          (standard Arch init)
 #   - cargo / rustup   (for building jeTT from source, if no pre-built binary)
+#   - plymouth         (pacman -S plymouth)  — for boot splash (optional)
 #
 # Usage:
 #   sudo bash sensor/install.sh
@@ -24,6 +25,7 @@
 #   6. Installs systemd service units
 #   7. Enables services in dependency order:
 #         kage-sensor → bifrost-guardian → jett
+#   8. Installs the kage-ryu Plymouth boot splash (non-fatal)
 # =============================================================================
 
 set -euo pipefail
@@ -130,6 +132,15 @@ for unit in kage-sensor.service bifrost-guardian.service jett.service; do
     ok "${unit} enabled and started."
 done
 
+# ── Step 8 (optional): Install Plymouth boot splash ───────────────────────────
+SPLASH_INSTALLER="$(cd "${SENSOR_DIR}/.." && pwd)/splash/install-splash.sh"
+if [[ -f "${SPLASH_INSTALLER}" ]]; then
+    info "Installing Kage-Ryu Plymouth boot splash…"
+    bash "${SPLASH_INSTALLER}" || warn "Boot splash installation failed — sensor stack is unaffected."
+else
+    warn "Splash installer not found at ${SPLASH_INSTALLER} — skipping boot splash setup."
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 printf '\n'
 ok "════════════════════════════════════════════════════"
@@ -140,6 +151,9 @@ ok "    ● kage-sensor.service      (BPF loader)"
 ok "    ● bifrost-guardian.service (socket server)"
 ok "    ● jett.service             (eBPF event daemon)"
 ok ""
+ok "  Boot splash: kage-ryu Plymouth theme installed."
+ok ""
 ok "  Run:  sensor/kage-status    to verify health"
 ok "  Logs: journalctl -u jett     to inspect events"
+ok "  Reboot to see the boot splash screen."
 ok "════════════════════════════════════════════════════"
