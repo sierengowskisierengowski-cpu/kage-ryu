@@ -79,15 +79,20 @@ if grep -qE '\bplymouth\b' "${MKINITCPIO_CONF}"; then
 else
     # Insert 'plymouth' after 'udev' if present, else after 'systemd', else append before closing paren
     if grep -qE '\budev\b' "${MKINITCPIO_CONF}"; then
-        sed -i 's/\budev\b/udev plymouth/' "${MKINITCPIO_CONF}"
+        sed -i '/^HOOKS=/s/\budev\b/udev plymouth/' "${MKINITCPIO_CONF}"
         ok "Inserted 'plymouth' after 'udev' in HOOKS."
     elif grep -qE '\bsystemd\b' "${MKINITCPIO_CONF}"; then
-        sed -i 's/\bsystemd\b/systemd plymouth/' "${MKINITCPIO_CONF}"
+        sed -i '/^HOOKS=/s/\bsystemd\b/systemd plymouth/' "${MKINITCPIO_CONF}"
         ok "Inserted 'plymouth' after 'systemd' in HOOKS."
     else
-        # Fallback: append plymouth before the closing paren of HOOKS=(...)
-        sed -i '/^HOOKS=(/s/)$/ plymouth)/' "${MKINITCPIO_CONF}"
-        ok "Appended 'plymouth' to HOOKS in ${MKINITCPIO_CONF}."
+        # Fallback: append plymouth before the closing paren of a single-line HOOKS=(...)
+        # Warn if HOOKS appears to span multiple lines so the operator can review
+        if awk '/^HOOKS=\(/{found=1} found && /\)/{found=0; exit 0} found{exit 1}' "${MKINITCPIO_CONF}"; then
+            sed -i '/^HOOKS=(/s/)$/ plymouth)/' "${MKINITCPIO_CONF}"
+            ok "Appended 'plymouth' to HOOKS in ${MKINITCPIO_CONF}."
+        else
+            warn "HOOKS spans multiple lines in ${MKINITCPIO_CONF} — add 'plymouth' manually."
+        fi
     fi
 fi
 
@@ -109,22 +114,28 @@ if [[ -f "${GRUB_DEFAULT}" ]]; then
 
     changed=false
 
-    # Idempotently add 'quiet' if missing
+    # Idempotently add 'quiet' if missing (handles double-quoted values)
     if ! grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=.*\bquiet\b' "${GRUB_DEFAULT}"; then
-        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ quiet"/' "${GRUB_DEFAULT}"
+        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT="[^"]*"/ s/"$/ quiet"/' "${GRUB_DEFAULT}"
         ok "Added 'quiet' to GRUB_CMDLINE_LINUX_DEFAULT."
         changed=true
     fi
 
-    # Idempotently add 'splash' if missing
+    # Idempotently add 'splash' if missing (handles double-quoted values)
     if ! grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT=.*\bsplash\b' "${GRUB_DEFAULT}"; then
-        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/ s/"$/ splash"/' "${GRUB_DEFAULT}"
+        sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT="[^"]*"/ s/"$/ splash"/' "${GRUB_DEFAULT}"
         ok "Added 'splash' to GRUB_CMDLINE_LINUX_DEFAULT."
         changed=true
     fi
 
     if [[ "${changed}" == false ]]; then
         ok "'splash' and 'quiet' already present in ${GRUB_DEFAULT} — skipping."
+    fi
+
+    # Warn if the line does not use double quotes (single-quoted or unquoted values need manual edit)
+    if ! grep -qE '^GRUB_CMDLINE_LINUX_DEFAULT="' "${GRUB_DEFAULT}"; then
+        warn "GRUB_CMDLINE_LINUX_DEFAULT does not use double quotes — verify 'splash quiet' were added correctly."
+        warn "Manual check: grep GRUB_CMDLINE_LINUX_DEFAULT ${GRUB_DEFAULT}"
     fi
 
     # ── Step 7: Regenerate GRUB config ───────────────────────────────────────

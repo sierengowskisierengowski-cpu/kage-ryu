@@ -134,9 +134,14 @@ done
 
 # ── Step 8 (optional): Install Plymouth boot splash ───────────────────────────
 SPLASH_INSTALLER="$(cd "${SENSOR_DIR}/.." && pwd)/splash/install-splash.sh"
+SPLASH_OK=false
 if [[ -f "${SPLASH_INSTALLER}" ]]; then
     info "Installing Kage-Ryu Plymouth boot splash…"
-    bash "${SPLASH_INSTALLER}" || warn "Boot splash installation failed — sensor stack is unaffected."
+    if bash "${SPLASH_INSTALLER}"; then
+        SPLASH_OK=true
+    else
+        warn "Boot splash installation failed — sensor stack is unaffected."
+    fi
 else
     warn "Splash installer not found at ${SPLASH_INSTALLER} — skipping boot splash setup."
 fi
@@ -151,9 +156,11 @@ ok "    ● kage-sensor.service      (BPF loader)"
 ok "    ● bifrost-guardian.service (socket server)"
 ok "    ● jett.service             (eBPF event daemon)"
 ok ""
-ok "  Boot splash: kage-ryu Plymouth theme installed."
-ok ""
+if [[ "${SPLASH_OK}" == true ]]; then
+    ok "  Boot splash: kage-ryu Plymouth theme installed."
+    ok "  Reboot to see the boot splash screen."
+    ok ""
+fi
 ok "  Run:  sensor/kage-status    to verify health"
 ok "  Logs: journalctl -u jett     to inspect events"
-ok "  Reboot to see the boot splash screen."
 ok "════════════════════════════════════════════════════"
