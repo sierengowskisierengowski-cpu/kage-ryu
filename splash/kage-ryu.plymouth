@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=kage-ryu
+Description=Kage-Ryu Shadow Dragon Kernel boot splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/kage-ryu
+ScriptFile=/usr/share/plymouth/themes/kage-ryu/kage-ryu.script
