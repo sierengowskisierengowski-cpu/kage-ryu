@@ -283,6 +283,26 @@ prepare() {
   scripts/config --disable CONFIG_NFC
   scripts/config --disable CONFIG_INFINIBAND
 
+  # ── Lean pass for THIS box (rev 2026-07-14): MSI GS77 = Intel iGPU +
+  # NVIDIA dGPU only, Docker uses bridge/overlay (not IPVS), no CAN/WWAN/
+  # exotic radios. Dropping these cuts the module set and build time with
+  # zero functional loss on this hardware. NVIDIA is the proprietary
+  # out-of-tree module (nvidia-open-dkms) so nouveau is pure dead weight.
+  msg2 "Lean: drop AMD/nouveau GPU, IPVS, CAN, WWAN, legacy staging..."
+  scripts/config --disable CONFIG_DRM_AMDGPU \
+                 --disable CONFIG_DRM_RADEON \
+                 --disable CONFIG_DRM_NOUVEAU \
+                 --disable CONFIG_IP_VS \
+                 --disable CONFIG_CAN \
+                 --disable CONFIG_WWAN \
+                 --disable CONFIG_WIMAX \
+                 --disable CONFIG_MEDIA_ANALOG_TV_SUPPORT \
+                 --disable CONFIG_MEDIA_DIGITAL_TV_SUPPORT \
+                 --disable CONFIG_MEDIA_RADIO_SUPPORT \
+                 --disable CONFIG_STAGING
+  # Keep: DRM_I915 + DRM_XE (Intel display path), all eBPF/netfilter/Docker,
+  # WireGuard, NTFS3, KVM — see the beast block above.
+
   # Compress modules by default (following Arch's kernel)
   if [ "$_compress_modules" = "y" ]; then
     scripts/config --enable CONFIG_MODULE_COMPRESS
