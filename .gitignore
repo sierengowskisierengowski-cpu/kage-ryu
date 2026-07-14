@@ -1,0 +1,14 @@
+# Kernel source tarballs + signatures (fetched at build time)
+linux-*.tar.xz
+linux-*.tar.sign
+patch-*.xz
+logo_linux_clut224.ppm
+
+# Built packages (huge; never commit)
+*.pkg.tar.zst
+*.pkg.tar.xz
+
+# makepkg build tree + generated config snapshot
+src/
+pkg/
+config.last

@@ -8,10 +8,13 @@
 ##   Example: env _microarchitecture=98 use_numa=n use_tracers=n makepkg -sc
 ##
 ## Look inside 'choose-gcc-optimization.sh' to choose your microarchitecture
-## Valid numbers between: 0 to 99
-## Default is: 98 => Intel native (override for generic/portable builds)
+## Valid numbers: 0 (generic x64), 1-44 (specific uarch), 99 (-march=native).
+## NOTE (2026-07-14): 98 was a BUG — it is NOT in the case table, so it fell
+## through to CONFIG_GENERIC_CPU and silently discarded ALL cpu tuning. This
+## build targets the MSI GS77 i7-12700H (Alder Lake) => 41 (CONFIG_MALDERLAKE).
+## Use 99 for pure -march=native (this exact CPU only); 0 for a portable build.
 if [ -z ${_microarchitecture+x} ]; then
-  _microarchitecture=98
+  _microarchitecture=41
 fi
 
 ## Disable NUMA since most users do not have multiple processors. Breaks CUDA/NvEnc.
@@ -208,6 +211,66 @@ prepare() {
   scripts/config --enable CONFIG_DEBUG_INFO_BTF
   scripts/config --enable CONFIG_WIREGUARD
   scripts/config --enable CONFIG_NTFS3_FS
+
+  # ── Kage-Ryu security-lab "beast" tuning (rev 2026-07-14) ─────────────────
+  # Everything below is justified by the operator's real workload (see
+  # Nyxus-Core docs/MACHINE_PROFILE.md): jeTT eBPF EDR, a 10-container Docker
+  # honeypot fleet, CUDA inference, malware/detonation VMs, and remote/C2 net.
+  # All idempotent --enable/--module; olddefconfig resolves deps afterward.
+
+  # eBPF observability depth — jeTT sensor + BCC + (recommended) bpftrace need
+  # kprobes/uprobes/tracepoints, BPF events, and per-module BTF for CO-RE.
+  msg2 "Kage-Ryu: eBPF observability depth (kprobes/uprobes/BTF modules)..."
+  scripts/config --enable CONFIG_KPROBES \
+                 --enable CONFIG_UPROBES \
+                 --enable CONFIG_BPF_EVENTS \
+                 --enable CONFIG_FTRACE_SYSCALLS \
+                 --enable CONFIG_DEBUG_INFO_BTF_MODULES \
+                 --enable CONFIG_KPROBE_EVENTS \
+                 --enable CONFIG_UPROBE_EVENTS \
+                 --enable CONFIG_FUNCTION_TRACER
+
+  # Containers — Docker honeypot fleet + rootless: namespaces, cgroup2 BPF,
+  # overlayfs, bridge/veth, and CRIU checkpoint/restore for snapshotting.
+  msg2 "Kage-Ryu: container substrate (userns, cgroup-bpf, overlay, CRIU)..."
+  scripts/config --enable CONFIG_USER_NS \
+                 --enable CONFIG_CGROUP_BPF \
+                 --enable CONFIG_MEMCG \
+                 --enable CONFIG_BLK_CGROUP \
+                 --enable CONFIG_CGROUP_PIDS \
+                 --enable CONFIG_CGROUP_FREEZER \
+                 --enable CONFIG_OVERLAY_FS \
+                 --enable CONFIG_BRIDGE \
+                 --enable CONFIG_VETH \
+                 --enable CONFIG_VXLAN \
+                 --enable CONFIG_CHECKPOINT_RESTORE
+
+  # KVM as modules — ad-hoc malware detonation / detection-lab VMs.
+  msg2 "Kage-Ryu: KVM (Intel) as modules..."
+  scripts/config --module CONFIG_KVM \
+                 --module CONFIG_KVM_INTEL
+
+  # Network — BBR congestion control + FQ qdisc (honeypot/C2/remote latency).
+  # Runtime default is set via a sysctl drop-in shipped by Nyxus, not baked
+  # into the kernel choice symbol (which is brittle to set here).
+  msg2 "Kage-Ryu: BBR + FQ networking..."
+  scripts/config --enable CONFIG_TCP_CONG_BBR \
+                 --enable CONFIG_NET_SCH_FQ \
+                 --enable CONFIG_NET_SCH_FQ_CODEL \
+                 --enable CONFIG_NETFILTER_XT_MATCH_OWNER
+
+  # Memory/throughput — MGLRU (better reclaim under CUDA+docker+compile load),
+  # THP (madvise), io_uring for async Rust/AI workloads.
+  msg2 "Kage-Ryu: MGLRU + THP(madvise) + io_uring..."
+  scripts/config --enable CONFIG_LRU_GEN \
+                 --enable CONFIG_LRU_GEN_ENABLED \
+                 --enable CONFIG_TRANSPARENT_HUGEPAGE \
+                 --enable CONFIG_TRANSPARENT_HUGEPAGE_MADVISE \
+                 --enable CONFIG_IO_URING
+
+  # SECURITY POSTURE: this operator runs untrusted code (malware, honeypots),
+  # so CPU speculative-exec mitigations stay AVAILABLE (do NOT hardcode
+  # mitigations=off). Mitigation level is a boot parameter, chosen per-boot.
 
   # Strip legacy / niche subsystems not needed on this build target
   msg2 "Stripping ham radio / ISDN / ATM / PCMCIA / FireWire / NFC / InfiniBand..."
