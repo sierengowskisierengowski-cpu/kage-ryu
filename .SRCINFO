@@ -1,5 +1,5 @@
 pkgbase = linux-kage-ryu
-	pkgdesc = Linux Kage-Ryu — Xanmod base, tuned for Intel native with eBPF/WireGuard/NTFS3
+	pkgdesc = Kage Ryu Nyxus — Xanmod-based NYXUS security kernel, tuned for Intel native with eBPF/WireGuard/NTFS3
 	pkgver = 7.0.12
 	pkgrel = 1
 	url = http://www.xanmod.org/
@@ -30,7 +30,7 @@ pkgbase = linux-kage-ryu
 	sha256sums = f4acc1760990c54348a029315d1505ccb7c7270cd70a9aeb728bffcced51e767
 
 pkgname = linux-kage-ryu
-	pkgdesc = The Linux kernel and modules with Xanmod patches (Kage-Ryu build)
+	pkgdesc = The Linux kernel and modules with Xanmod patches (Kage Ryu Nyxus build)
 	depends = coreutils
 	depends = initramfs
 	depends = kmod
@@ -46,5 +46,5 @@ pkgname = linux-kage-ryu
 	replaces = wireguard-arch
 
 pkgname = linux-kage-ryu-headers
-	pkgdesc = Headers and scripts for building modules for the Linux Kage-Ryu kernel
+	pkgdesc = Headers and scripts for building modules for the Kage Ryu Nyxus kernel
 	depends = pahole
