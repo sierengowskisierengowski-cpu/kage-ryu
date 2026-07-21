@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# kage-ryu-scx — launch the best available sched-ext (BPF) CPU scheduler.
+#
+# The Kage-Ryu kernel ships CONFIG_SCHED_CLASS_EXT=y, which lets a userspace
+# BPF program *be* the CPU scheduler. This picks the best one present for an
+# interactive gaming/security workstation and runs it in the foreground
+# (systemd Type=simple). When it exits, the kernel transparently reverts to
+# the built-in EEVDF scheduler — so this is safe to start/stop at will.
+#
+# Install schedulers with:  sudo pacman -S scx-scheds
+set -euo pipefail
+
+# Preference order:
+#   scx_lavd      Latency-criticality Aware Virtual Deadline — tuned for
+#                 gaming/interactive + laptop; the best default for this box.
+#   scx_bpfland   Interactive-first, good general desktop fallback.
+#   scx_rustland  Fully userspace-driven fallback.
+#   scx_rusty     Multi-domain throughput fallback.
+for sched in scx_lavd scx_bpfland scx_rustland scx_rusty; do
+  if command -v "$sched" >/dev/null 2>&1; then
+    echo "kage-ryu-scx: starting $sched" >&2
+    exec "$sched" "$@"
+  fi
+done
+
+echo "kage-ryu-scx: no sched-ext scheduler found." >&2
+echo "              install one with:  sudo pacman -S scx-scheds" >&2
+exit 1
