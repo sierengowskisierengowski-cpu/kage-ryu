@@ -1,0 +1,15 @@
+# pacman hook: re-bind the Kage-Ryu machine profile whenever the kernel is
+# installed or upgraded, so an update never silently reverts the tuning or
+# leaves the custom scheduler un-enabled. Installed to:
+#   /usr/share/libalpm/hooks/95-kage-ryu-activate.hook
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = linux-kage-ryu
+
+[Action]
+Description = Activating Kage-Ryu machine profile (tuning + sched-ext scheduler)…
+When = PostTransaction
+Exec = /usr/share/libalpm/scripts/kage-ryu-activate
+NeedsTargets

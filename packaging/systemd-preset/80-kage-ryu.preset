@@ -1,0 +1,6 @@
+# Kage-Ryu systemd preset — enable the custom sched-ext scheduler by default.
+# Installed to /usr/lib/systemd/system-preset/80-kage-ryu.preset and applied by
+# `systemctl preset-all` (archiso firstboot runs this). The unit's
+# ConditionPathExists=/sys/kernel/sched_ext keeps it a clean no-op on any
+# kernel that isn't Kage-Ryu, so enabling it by default is safe.
+enable scx-kage.service

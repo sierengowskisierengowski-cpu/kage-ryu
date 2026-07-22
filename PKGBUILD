@@ -196,8 +196,13 @@ prepare() {
   scripts/config --disable CONFIG_HZ_250
   scripts/config --disable CONFIG_HZ_300
 
-  # Full kernel preemption (PREEMPT_RT-style voluntary → full)
-  msg2 "Enabling full preemption..."
+  # Preemption. NOTE: this XanMod base is PREEMPT_DYNAMIC=y with PREEMPT_LAZY
+  # as the compiled default, and `olddefconfig` reconciles the preempt *choice*
+  # back to lazy — so these lines do NOT bake full preempt in. That is fine and
+  # intended: full preemption is selected at BOOT via `preempt=full` (shipped by
+  # profile/cmdline.conf), which is more flexible and needs no rebuild. Lines
+  # kept as an explicit statement of intent / for non-DYNAMIC rebuilds.
+  msg2 "Requesting full preemption (realized at boot via preempt=full)..."
   scripts/config --enable  CONFIG_PREEMPT
   scripts/config --disable CONFIG_PREEMPT_NONE
   scripts/config --disable CONFIG_PREEMPT_VOLUNTARY

@@ -1,0 +1,22 @@
+[Unit]
+Description=Kage-Ryu sched-ext BPF CPU scheduler
+Documentation=https://github.com/sched-ext/scx
+# Only meaningful on a SCHED_CLASS_EXT kernel — the sched_ext sysfs dir only
+# exists when the running kernel supports it (Kage-Ryu ships it =y). On any
+# other kernel this condition fails and the unit is a clean no-op.
+ConditionPathExists=/sys/kernel/sched_ext
+After=multi-user.target
+# If no scx scheduler is installed yet, don't thrash — cap restarts.
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kage-ryu-scx
+Restart=on-failure
+RestartSec=3
+Nice=-5
+OOMScoreAdjust=-800
+
+[Install]
+WantedBy=multi-user.target
