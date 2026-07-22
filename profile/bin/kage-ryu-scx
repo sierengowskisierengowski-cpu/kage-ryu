@@ -11,12 +11,22 @@
 set -euo pipefail
 
 # Preference order:
+#   scx_kage      OUR custom scheduler — Intel P/E-core aware + coupled to the
+#                 kage eBPF EDR (quarantined PIDs confined to E-cores). This is
+#                 the one built for this box; prefer it when installed.
 #   scx_lavd      Latency-criticality Aware Virtual Deadline — tuned for
-#                 gaming/interactive + laptop; the best default for this box.
+#                 gaming/interactive + laptop; best stock fallback for this box.
 #   scx_bpfland   Interactive-first, good general desktop fallback.
 #   scx_rustland  Fully userspace-driven fallback.
 #   scx_rusty     Multi-domain throughput fallback.
-for sched in scx_lavd scx_bpfland scx_rustland scx_rusty; do
+#
+# scx_kage installs to /usr/local/bin (not on the hook/root PATH by default),
+# so check that path explicitly before the PATH-based lookups.
+if [[ -x /usr/local/bin/scx_kage ]]; then
+  echo "kage-ryu-scx: starting scx_kage (custom P/E-aware, EDR-coupled)" >&2
+  exec /usr/local/bin/scx_kage "$@"
+fi
+for sched in scx_kage scx_lavd scx_bpfland scx_rustland scx_rusty; do
   if command -v "$sched" >/dev/null 2>&1; then
     echo "kage-ryu-scx: starting $sched" >&2
     exec "$sched" "$@"
@@ -24,5 +34,6 @@ for sched in scx_lavd scx_bpfland scx_rustland scx_rusty; do
 done
 
 echo "kage-ryu-scx: no sched-ext scheduler found." >&2
-echo "              install one with:  sudo pacman -S scx-scheds" >&2
+echo "              build the custom one:  make -C scheduler && sudo make -C scheduler install" >&2
+echo "              or install stock ones:  sudo pacman -S scx-scheds" >&2
 exit 1

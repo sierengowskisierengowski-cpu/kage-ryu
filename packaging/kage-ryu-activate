@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  kage-ryu-activate — bind the installed Kage-Ryu kernel to THIS machine.
+#
+#  Runs automatically from the pacman hook (PostTransaction) after
+#  linux-kage-ryu is installed or upgraded, and once from
+#  install-activation.sh on bare metal. Idempotent and non-interactive.
+#
+#  It (1) applies the tuning drop-ins + the Kage-Ryu boot cmdline, (2) makes
+#  sure the custom scx_kage scheduler is built + installed, and (3) ENABLES
+#  the scheduler service for the next boot. It never STARTS the scheduler
+#  here — swapping the CPU scheduler mid-pacman-transaction would be reckless;
+#  it comes up cleanly on the next Kage-Ryu boot instead.
+#
+#  © 2026 Joseph A. Sierengowski — Kage Ryu Nyxus.
+# ============================================================================
+set -euo pipefail
+
+ASSETS=/usr/share/kage-ryu
+log() { printf '  \033[1;35m[kage-ryu]\033[0m %s\n' "$*"; }
+
+if [[ $EUID -ne 0 ]]; then
+  echo "kage-ryu-activate: must run as root" >&2
+  exit 1
+fi
+
+# 1. tuning drop-ins + boot cmdline (idempotent; Kage-Ryu boot entry only) ----
+if [[ -x "$ASSETS/profile/apply-kage-ryu-profile.sh" ]]; then
+  "$ASSETS/profile/apply-kage-ryu-profile.sh" --cmdline \
+    || log "profile apply returned non-zero (continuing)"
+else
+  log "profile assets missing at $ASSETS/profile (skipping tuning)"
+fi
+
+# 2. custom scheduler: install prebuilt, else build if the toolchain is here --
+if [[ ! -x /usr/local/bin/scx_kage ]]; then
+  if command -v clang >/dev/null 2>&1 && command -v bpftool >/dev/null 2>&1 \
+     && [[ -d "$ASSETS/scheduler" ]]; then
+    log "building custom scx_kage scheduler…"
+    if make -C "$ASSETS/scheduler" >/dev/null 2>&1 \
+       && make -C "$ASSETS/scheduler" install >/dev/null 2>&1; then
+      log "scx_kage built + installed → /usr/local/bin/scx_kage"
+    else
+      log "scx_kage build failed — tuning still applied."
+      log "  build later:  sudo make -C $ASSETS/scheduler && sudo make -C $ASSETS/scheduler install"
+    fi
+  else
+    log "scx_kage not built (needs clang + bpftool); kernel tuning still applied."
+    log "  build later:  sudo make -C $ASSETS/scheduler && sudo make -C $ASSETS/scheduler install"
+  fi
+fi
+
+# 3. enable the scheduler service for next boot (never start it here) ---------
+if [[ -f "$ASSETS/scheduler/systemd/scx-kage.service" ]]; then
+  install -Dm644 "$ASSETS/scheduler/systemd/scx-kage.service" \
+    /etc/systemd/system/scx-kage.service 2>/dev/null || true
+fi
+if [[ -f /etc/systemd/system/scx-kage.service ]]; then
+  systemctl enable scx-kage.service >/dev/null 2>&1 \
+    && log "scx-kage.service enabled (starts on the next Kage-Ryu boot)" \
+    || log "could not enable scx-kage.service (enable manually if wanted)"
+fi
+
+log "activation complete — reboot into Kage-Ryu to pick up cmdline + scheduler"
