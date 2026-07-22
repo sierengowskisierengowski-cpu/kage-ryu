@@ -32,12 +32,35 @@ Together they form a continuous kernel → user-space → AI enforcement loop de
 | Feature | Detail |
 |---|---|
 | **HZ=1000** | Lowest scheduling latency for gaming and workstation workloads |
-| **Full preemption** | `CONFIG_PREEMPT` enabled — sub-millisecond response under load |
-| **Intel native optimisation** | Compiled with `-march=native` for the host CPU (override with `_microarchitecture=0`) |
+| **Dynamic preemption** | `PREEMPT_DYNAMIC` + `PREEMPT_LAZY` — full preemption is a boot choice; the machine profile sets `preempt=full` (no rebuild) |
+| **sched-ext ready** | `CONFIG_SCHED_CLASS_EXT=y` — run a BPF CPU scheduler (`scx_lavd`) via the machine profile |
+| **Alder Lake tuned** | Built with `CONFIG_MALDERLAKE` (`_microarchitecture=41`); use `99` for `-march=native`, `0` for a portable build |
 | **Stripped bloat** | Ham radio, ISDN, ATM, PCMCIA, FireWire, NFC, and InfiniBand disabled |
 | **eBPF retained** | `BPF_SYSCALL`, `BPF_JIT`, `BPF_LSM`, and `DEBUG_INFO_BTF` all enabled |
 | **WireGuard retained** | In-tree WireGuard VPN module |
 | **NTFS3 retained** | In-tree read/write NTFS3 driver |
+
+---
+
+## Machine Activation Profile
+
+The kernel config is maxed out, but many capabilities ship dormant. The
+[`profile/`](profile/) folder is a **no-recompile activation layer** that binds
+the kernel to this exact box and mission (MSI GS77 · Alder Lake · RTX 3060 ·
+security lab):
+
+- a **sched-ext BPF CPU scheduler** (`scx_lavd`) for low interactive latency under load,
+- `preempt=full` via cmdline (realizes full preemption without a rebuild),
+- nested-KVM + Intel GuC/HuC + BBR + container/inotify limits,
+- **security-first defaults** — no info-leak knobs loosened, mitigations kept available (this box detonates untrusted samples).
+
+```bash
+sudo profile/apply-kage-ryu-profile.sh              # safe baseline
+sudo profile/apply-kage-ryu-profile.sh --enable-scx --cmdline   # full power
+```
+
+See [`profile/README.md`](profile/README.md) for details. The stock `linux`
+boot entry is never touched.
 
 ---
 

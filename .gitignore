@@ -12,3 +12,6 @@ logo_linux_clut224.ppm
 src/
 pkg/
 config.last
+
+# Build log (regenerated each build)
+build.log
