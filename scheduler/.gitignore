@@ -1,0 +1,5 @@
+# generated build artifacts
+vmlinux.h
+scx_kage.bpf.o
+scx_kage.skel.h
+scx_kage

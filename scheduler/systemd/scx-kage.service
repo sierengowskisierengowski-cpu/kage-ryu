@@ -1,0 +1,24 @@
+[Unit]
+Description=scx_kage — Kage-Ryu hybrid-aware, EDR-coupled sched-ext scheduler
+Documentation=https://github.com/sierengowskisierengowski-cpu/kage-ryu
+# sched_ext sysfs only exists on a SCHED_CLASS_EXT kernel (Kage-Ryu ships it).
+# On any other kernel this condition fails and the unit is a clean no-op.
+ConditionPathExists=/sys/kernel/sched_ext
+After=multi-user.target
+# Only one sched-ext scheduler can be attached at a time.
+Conflicts=scx-kage-ryu.service
+# Don't thrash if it can't attach (e.g. another scx scheduler is running).
+StartLimitIntervalSec=30
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/scx_kage
+Restart=on-failure
+RestartSec=3
+# Keep the scheduler itself responsive and un-killable under memory pressure.
+Nice=-10
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target
