@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# scx_kage_ctl — demote / restore / list processes in the scx_kage penalty
+# domain. The scheduler pins its quarantine map here; this is the same map the
+# jeTT AI EDR writes to, so a manual demote and an AI verdict use one path.
+#
+# Demoting a PID strictly confines it (and its threads) to the Efficiency
+# cores with a short time slice on a hybrid CPU — before anything kills it.
+#
+#   scx_kage_ctl demote  <pid>     push a process into the penalty domain
+#   scx_kage_ctl restore <pid>     remove it from the penalty domain
+#   scx_kage_ctl list              show all currently-penalised tgids
+#   scx_kage_ctl status            is scx_kage the active scheduler?
+#
+# © 2026 Joseph A. Sierengowski — Kage Ryu Nyxus.
+set -euo pipefail
+
+MAP=/sys/fs/bpf/scx_kage_quarantine
+
+die() { echo "scx_kage_ctl: $*" >&2; exit 1; }
+
+# u32 pid -> four little-endian hex bytes for bpftool
+le32() {
+	local n=$1
+	printf '0x%02x 0x%02x 0x%02x 0x%02x' \
+		$(( n & 0xff )) $(( (n>>8) & 0xff )) $(( (n>>16) & 0xff )) $(( (n>>24) & 0xff ))
+}
+
+need_map() {
+	[[ -e "$MAP" ]] || die "quarantine map not found at $MAP — is scx_kage running? (sudo systemctl start scx-kage-ryu)"
+	command -v bpftool >/dev/null || die "bpftool not installed"
+}
+
+cmd=${1:-}; arg=${2:-}
+case "$cmd" in
+	demote)
+		[[ -n "$arg" ]] || die "usage: scx_kage_ctl demote <pid>"
+		need_map
+		bpftool map update pinned "$MAP" key $(le32 "$arg") value 0x01 0x00 0x00 0x00
+		echo "scx_kage_ctl: pid $arg demoted to the penalty (E-core) domain"
+		;;
+	restore)
+		[[ -n "$arg" ]] || die "usage: scx_kage_ctl restore <pid>"
+		need_map
+		bpftool map delete pinned "$MAP" key $(le32 "$arg") 2>/dev/null \
+			&& echo "scx_kage_ctl: pid $arg restored to normal scheduling" \
+			|| echo "scx_kage_ctl: pid $arg was not in the penalty domain"
+		;;
+	list)
+		need_map
+		echo "penalised tgids:"
+		bpftool map dump pinned "$MAP" 2>/dev/null || echo "  (empty)"
+		;;
+	status)
+		if [[ -r /sys/kernel/sched_ext/root/ops ]]; then
+			printf 'active sched_ext scheduler: %s\n' "$(cat /sys/kernel/sched_ext/root/ops)"
+		elif [[ -r /sys/kernel/sched_ext/state ]]; then
+			printf 'sched_ext state: %s\n' "$(cat /sys/kernel/sched_ext/state)"
+		else
+			echo "sched_ext not active (running built-in EEVDF)"
+		fi
+		;;
+	*)
+		sed -n '2,14p' "$0"
+		exit 2
+		;;
+esac
