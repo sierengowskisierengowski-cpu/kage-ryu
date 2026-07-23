@@ -245,6 +245,25 @@ prepare() {
                  --enable CONFIG_VXLAN \
                  --enable CONFIG_CHECKPOINT_RESTORE
 
+  # LIVE MEDIA (archiso) — XanMod lean/localmodconfig strips these; without them
+  # the default Kage-Ryu live entry dies with:
+  #   mount: unknown filesystem type 'iso9660'
+  # QEMU-confirmed 2026-07-23 on nyxus-2026.07.23 ISO. Built-in (=y) so the
+  # early archiso hooks work even before modules are available from the img.
+  msg2 "Kage-Ryu: live-ISO substrate (iso9660 + squashfs + loop + dm)..."
+  scripts/config --enable CONFIG_ISO9660_FS \
+                 --enable CONFIG_JOLIET \
+                 --enable CONFIG_ZISOFS \
+                 --enable CONFIG_UDF_FS \
+                 --enable CONFIG_SQUASHFS \
+                 --enable CONFIG_SQUASHFS_ZLIB \
+                 --enable CONFIG_SQUASHFS_XZ \
+                 --enable CONFIG_SQUASHFS_ZSTD \
+                 --enable CONFIG_BLK_DEV_LOOP \
+                 --enable CONFIG_BLK_DEV_DM \
+                 --enable CONFIG_NLS_UTF8 \
+                 --enable CONFIG_NLS_ISO8859_1
+
   # KVM as modules — ad-hoc malware detonation / detection-lab VMs.
   msg2 "Kage-Ryu: KVM (Intel) as modules..."
   scripts/config --module CONFIG_KVM \
@@ -352,8 +371,47 @@ prepare() {
     fi
   fi
 
+  # LIVE MEDIA RE-ASSERT (2026-07-23) — ORDER-CRITICAL.
+  # `make localmodconfig` above strips anything not present in modprobed.db, and
+  # the BUILD HOST never has iso9660/squashfs/loop loaded (they are only used
+  # while booting live media). That silently undoes the enables set earlier in
+  # prepare() and is exactly how the 7.0.12 pkgs shipped unable to boot the ISO
+  # ("mount: unknown filesystem type 'iso9660'", QEMU-confirmed 2026-07-23).
+  # Re-assert them HERE, after localmodconfig, so they always reach the final
+  # config. Built-in (=y) so early archiso hooks work before modules exist.
+  msg2 "Kage-Ryu: re-asserting live-ISO substrate after localmodconfig..."
+  scripts/config --enable CONFIG_ISO9660_FS \
+                 --enable CONFIG_JOLIET \
+                 --enable CONFIG_ZISOFS \
+                 --enable CONFIG_UDF_FS \
+                 --enable CONFIG_SQUASHFS \
+                 --enable CONFIG_SQUASHFS_ZLIB \
+                 --enable CONFIG_SQUASHFS_XZ \
+                 --enable CONFIG_SQUASHFS_ZSTD \
+                 --enable CONFIG_BLK_DEV_LOOP \
+                 --enable CONFIG_BLK_DEV_DM \
+                 --enable CONFIG_NLS_UTF8 \
+                 --enable CONFIG_NLS_ISO8859_1
+
   msg2 "make ${_compiler_flags} olddefconfig"
   make ${_compiler_flags} olddefconfig
+
+  # HARD GATE — never again ship a Kage-Ryu that cannot mount live media.
+  # Fails the build in seconds instead of after a multi-hour compile + ISO bake
+  # + flash + boot, which is how this bug was found the first time.
+  msg2 "Kage-Ryu: verifying live-ISO substrate survived config resolution..."
+  _live_missing=()
+  for _c in CONFIG_ISO9660_FS CONFIG_SQUASHFS CONFIG_BLK_DEV_LOOP; do
+    grep -qE "^${_c}=(y|m)\$" .config || _live_missing+=("${_c}")
+  done
+  if (( ${#_live_missing[@]} )); then
+    error "Kage-Ryu: live-ISO configs missing after olddefconfig: ${_live_missing[*]}"
+    error "This kernel would fail to boot the archiso live USB with:"
+    error "    mount: unknown filesystem type 'iso9660'"
+    error "Aborting before wasting a full compile + bake cycle."
+    return 1
+  fi
+  msg2 "Kage-Ryu: live-ISO substrate OK (iso9660 + squashfs + loop)"
 
   make -s kernelrelease > version
   msg2 "Prepared %s version %s" "$pkgbase" "$(<version)"
